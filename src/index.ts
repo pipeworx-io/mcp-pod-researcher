@@ -835,7 +835,15 @@ function hasEmailShapedArg(args: Record<string, unknown>): boolean {
   return Object.entries(args).some(([k, v]) => !k.startsWith('_') && walk(v));
 }
 
-class Refusal extends Error {}
+/** A refusal of the CALL. `cls` is the gateway's error-class routing token
+ *  (workers/gateway/src/error-class.ts): a caller mistake books as user_error,
+ *  not as a 500 our quality dashboards count as our failure (#2406). null
+ *  leaves the message to the gateway's own classifier. */
+class Refusal extends Error {
+  constructor(message: string, readonly cls: 'user_error' | null = 'user_error') {
+    super(message);
+  }
+}
 
 function iso(epochSeconds: unknown): string | null {
   const n = Number(epochSeconds);
@@ -1089,7 +1097,7 @@ async function runSearch(ctx: Ctx, a: { topic: string; purpose: Purpose; require
   } catch (e) {
     throw new Error(`the podcast index did not answer (${String((e as Error)?.message ?? e).slice(0, 160)}). Retry shortly; nothing about your arguments was wrong.`);
   }
-  if (r.error) throw new Refusal(String(r.message ?? r.error));
+  if (r.error) throw new Refusal(String(r.message ?? r.error), null); // pod-index's answer: not necessarily the caller's mistake
   return { r, excludeShows, excludePeople };
 }
 
@@ -1224,7 +1232,7 @@ async function refreshPodcast(ctx: Ctx, args: Record<string, unknown>) {
 
 function requireAccount(ctx: Ctx, tool: string): { account: string; db: Db } {
   if (!ctx.account) {
-    throw new Refusal(`${tool} requires an API key from a signed-in account: outreach history and watches are kept per account, and an anonymous caller has none. Get a free key at pipeworx.io/signup and call again with it.`);
+    throw new Refusal(`${tool} requires an API key from a signed-in account: outreach history and watches are kept per account, and an anonymous caller has none. Get a free key at pipeworx.io/signup and call again with it.`, null);
   }
   if (!ctx.db) throw new Error('the account store is not configured on this deployment. This is a setup problem, not your arguments.');
   return { account: ctx.account, db: ctx.db };
@@ -1413,7 +1421,7 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
         throw new Error(`Unknown tool: ${name}`);
     }
   } catch (e) {
-    if (e instanceof Refusal) throw new Error(e.message);
+    if (e instanceof Refusal) throw new Error(e.cls ? `${e.cls}: ${e.message}` : e.message);
     throw e;
   }
 }
