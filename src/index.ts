@@ -875,6 +875,26 @@ const CONTACTS_NOTE =
 
 // ─────────────────────────────────────────────────────────────── Supabase (account data)
 
+/** Account-store reads/writes are ~50 ms; 10 s is generous and keeps the whole
+ *  find_podcast_contacts call (store read + index search) inside a client's
+ *  patience (fleet #2427). */
+const PG_TIMEOUT_MS = 10_000;
+/** The index bounds its own search at 20 s (workers/pod-index/src/search.ts);
+ *  this is the pack's backstop for the RPC hop itself, so a stalled service
+ *  binding still turns into an answer rather than zero bytes. */
+const INDEX_RPC_TIMEOUT_MS = 25_000;
+
+function withDeadline<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  let t: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    t = setTimeout(() => reject(new Error(`${what} gave no answer in ${Math.round(ms / 1000)} s`)), ms);
+  });
+  p.catch(() => {}); // a late rejection after the deadline must not go unhandled
+  return Promise.race([p, timeout]).finally(() => {
+    if (t !== null) clearTimeout(t);
+  });
+}
+
 async function pg(db: Db, path: string, init: RequestInit = {}): Promise<unknown> {
   const res = await fetchWithTimeout(
     `${db.url.replace(/\/+$/, '')}/rest/v1/${path}`,
@@ -889,6 +909,7 @@ async function pg(db: Db, path: string, init: RequestInit = {}): Promise<unknown
       },
     },
     'pod-researcher account store',
+    PG_TIMEOUT_MS,
   );
   const text = await res.text();
   if (!res.ok) {
@@ -1047,18 +1068,24 @@ async function runSearch(ctx: Ctx, a: { topic: string; purpose: Purpose; require
   const excludePeople = [...sup.hardPeople, ...(includeEngaged ? [] : [...sup.softPeople])];
   let r: Row;
   try {
-    r = await ctx.idx.search({
-      topic: a.topic,
-      purpose: a.purpose,
-      language: a.language,
-      country: a.country,
-      active_only: a.active_only,
-      require_route: a.require_route,
-      limit: a.limit,
-      cursor: a.cursor,
-      exclude_show_ids: excludeShows,
-      exclude_person_keys: excludePeople,
-    });
+    r = await withDeadline(
+      Promise.resolve(
+        ctx.idx.search({
+          topic: a.topic,
+          purpose: a.purpose,
+          language: a.language,
+          country: a.country,
+          active_only: a.active_only,
+          require_route: a.require_route,
+          limit: a.limit,
+          cursor: a.cursor,
+          exclude_show_ids: excludeShows,
+          exclude_person_keys: excludePeople,
+        }),
+      ),
+      INDEX_RPC_TIMEOUT_MS,
+      'the index',
+    );
   } catch (e) {
     throw new Error(`the podcast index did not answer (${String((e as Error)?.message ?? e).slice(0, 160)}). Retry shortly; nothing about your arguments was wrong.`);
   }
@@ -1099,6 +1126,11 @@ async function findPodcastContacts(ctx: Ctx, args: Record<string, unknown>) {
       of: cov.of ?? null,
       partial: cov.partial ?? null,
       failed_shards: cov.failed_shards ?? [],
+      // Stages the index cut at its own deadline (fleet #2427): 'routes' = some
+      // candidates never had their routes checked; 'catalog' = shows came back
+      // without catalog enrichment. Either one makes `partial` true.
+      timed_out_stages: cov.timed_out_stages ?? [],
+      index_timings_ms: r.timings ?? null,
       matching_shows: r.total_matching_shows ?? null,
       candidates_considered: r.candidates_considered ?? null,
       candidates_skipped: r.candidates_skipped ?? null,
