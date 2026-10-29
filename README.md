@@ -2,7 +2,7 @@
 
 Podcast prospecting for guest booking and sponsorship: given a topic and a purpose, returns active podcasts whose recent episodes cover the topic, each with the best contact route the show itself published, the episodes that prove the fit, and your own outreach history so you never pitch the same show twice.
 
-Part of [Pipeworx](https://pipeworx.io) — an MCP gateway connecting AI agents to 1684+ live data sources.
+Part of [Pipeworx](https://pipeworx.io) — an MCP gateway connecting AI agents to 1856+ live data sources. This is an independent, unofficial integration — not affiliated with, endorsed by, or published by the upstream provider.
 
 ## Tools
 
@@ -11,6 +11,8 @@ Part of [Pipeworx](https://pipeworx.io) — an MCP gateway connecting AI agents 
 - `refresh_podcast(id)` — re-read one show's RSS feed now rather than waiting for its next scheduled check.
 - `watch_podcast_topic(topic, purpose, ...)` / `get_podcast_topic_changes(watch_id?)` — save a search and get the shows that newly match it.
 - `record_podcast_outreach(show_id, outcome, scope?, contact_id?)` — record contacted / replied / declined / booked / bounced / do_not_contact / clear. Declined and do_not_contact shows leave your searches; a `scope: "person"` record hides every show that publishes that person's address. Private to your account.
+- `list_podcast_transcripts(id, episode?, limit?)` — which episodes have a publisher-provided transcript and where: reads the show's RSS feed live and lists every episode's Podcasting 2.0 `<podcast:transcript>` links (URL, declared type, format `srt` / `vtt` / `json` / `text` / `html`, language, rel). Episodes without one stay in the list as `transcript_status: "no_publisher_transcript"`; a show with none says so in `note` with `transcript_coverage: "none"` and the episode list intact. `id` is a show_id, podcast:guid or feed URL (a feed URL the index does not know is read directly).
+- `search_podcast_transcript(id, query, episode?, format?, limit?, window_seconds?)` — passages of one episode's transcript that match a query, each with `start` / `end` (hh:mm:ss and seconds), the speakers when the file names them, and `matched_terms`. Defaults to the newest episode with a transcript; `episode` takes a guid, URL, episode number or title words. Formats parsed: SRT, WebVTT, Podcasting 2.0 JSON, plain text (timestamped lines, or untimed text returned with `timing_note`) and HTML. `found: false, reason: "no_publisher_transcript"` names the episodes that do have one. A feed or file that fails to fetch or parse throws an error naming the upstream HTTP status or the format.
 
 ## Auth
 
@@ -31,6 +33,7 @@ Addresses are never synthesised. A global removal list is honoured at serve time
 - Podcast Index open directory (<https://podcastindex.org>) — which podcasts exist, their feed URLs and identifiers.
 - Each show's RSS feed — episodes, publishing cadence, the `itunes:owner` address and invitation lines in episode notes.
 - Each show's own website — its guest, advertise and contact pages.
+- Each show's own RSS feed and the transcript file its `<podcast:transcript>` tag links to (Podcasting 2.0 namespace, <https://podcastindex.org/namespace/1.0>) — fetched live per call, never stored; every transcript response carries the feed URL, the file URL and the time each was fetched in `data_as_of`. Transcripts are the publisher's: whether one exists, its accuracy and its timing are theirs.
 
 Matching is on words in episode titles and show notes (the latest ~30 episodes per show), so a show that never names the topic in its notes is not found. Generated-content spam is left out by a classifier that also catches some real shows whose episode notes disclose AI assistance. Contact coverage is still growing: `route_check` on each result says whether the show's website has been read yet, so "none found" and "not looked at yet" are distinguishable.
 
@@ -78,7 +81,7 @@ directly, instead of just this one's:
 }
 ```
 
-Both URLs reach the same gateway and the same 1684+ data sources. The
+Both URLs reach the same gateway and the same 1856+ data sources. The
 only difference is which pack's tools are listed **directly**; `ask_pipeworx`
 reaches all of them from either one.
 
@@ -92,10 +95,12 @@ curl -X POST https://gateway.pipeworx.io/v1/tools/find_podcast_contacts \
 
 No account needed for the first calls. Inspect any tool: `GET https://gateway.pipeworx.io/v1/tools/find_podcast_contacts`. Find one: `POST https://gateway.pipeworx.io/v1/tools/search_packs` with `{"query":"..."}`.
 
-## Standalone (no gateway account)
+## Run it from npm
 
-This package also runs as a local stdio MCP server — no Pipeworx account, no
-gateway round-trip:
+`@pipeworx/mcp-pod-researcher` is a local stdio bridge to the Pipeworx gateway: your MCP client
+starts it with `npx`, and it forwards every call to the same
+`https://gateway.pipeworx.io/pod-researcher/mcp` endpoint shown above. It needs network access;
+there is no offline mode.
 
 ```json
 {
@@ -108,15 +113,18 @@ gateway round-trip:
 }
 ```
 
-Or run it directly to confirm it starts:
+Without a key it calls anonymously, capped at 50 calls a day. A free account
+raises that to 200 a day: get a key at https://pipeworx.io/signup and add
+`"env": { "PIPEWORX_API_KEY": "<your key>" }` to the server entry.
+The key is sent as a Bearer token, the same way a hosted connection sends it,
+so calls are metered and billed exactly as they are there.
 
-```bash
-npx -y @pipeworx/mcp-pod-researcher
-```
+It lists **only** this pack's tools by default. Set `PIPEWORX_META_TOOLS=1` to
+also list `ask_pipeworx` and the other gateway-wide tools.
 
-It speaks MCP over stdin/stdout and answers `initialize`/`tools/list`/`tools/call`
-for **only** this pack's tools — none of the shared meta-tools the gateway
-connection above adds. Same source, same tools, no ask_pipeworx routing.
+Behind an HTTPS proxy: Node's built-in `fetch` does not read `HTTPS_PROXY` by
+default. Newer Node releases honour it when `NODE_USE_ENV_PROXY=1` is set; check
+your Node version's documentation.
 
 ## Using with ask_pipeworx
 
