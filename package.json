@@ -1,6 +1,6 @@
 {
   "name": "@pipeworx/mcp-pod-researcher",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "pod-researcher — podcast prospecting for guest booking and sponsorship.",
   "type": "module",
   "main": "lib/index.js",
@@ -27,7 +27,7 @@
     "mode": "gateway",
     "slug": "pod-researcher",
     "gatewaySlug": "pod-researcher",
-    "sourceHash": "v1-b201167a21210f915eb10f22b528a1ae4ee9b3fb6eca6ad00924a3260d1af2de",
-    "sourceCommit": "6bae4cfa7b6a73bbe014dc8820a19c80c842b21e"
+    "sourceHash": "v1-2c1e347018234af4da6397487ebcf1421aa5908c0eded0fb558d320a0e64e0c3",
+    "sourceCommit": "243a06a6ca2d3b6075325f3b66a1468d0a2eb603"
   }
 }
